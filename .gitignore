@@ -1,0 +1,17 @@
+__pycache__/
+.DS_Store
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.venv/
+venv/
+node_modules/
+dist/
+build/
+coverage/
+*.log
+ml/models/*.keras
+ml/models/*.h5
+backend/.env
+frontend/.env
