@@ -1,7 +1,10 @@
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000/api";
+const isProd = import.meta.env.PROD;
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
 const WS_BASE_URL =
-  import.meta.env.VITE_WS_BASE_URL || "ws://127.0.0.1:8000/api/emotion/ws";
+  import.meta.env.VITE_WS_BASE_URL ||
+  (isProd
+    ? `wss://${window.location.host}/api/emotion/ws`
+    : `ws://${window.location.host}/api/emotion/ws`);
 
 export async function detectEmotion(formData) {
   const response = await fetch(`${API_BASE_URL}/emotion`, {
