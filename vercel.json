@@ -4,11 +4,15 @@
   "framework": "vite",
   "rewrites": [
     {
-      "source": "/api/(.*)",
+      "source": "/api/health",
       "destination": "/api/index.py"
     },
     {
-      "source": "/(.*)",
+      "source": "/api/:path*",
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
   ]
