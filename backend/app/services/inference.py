@@ -5,11 +5,12 @@ import json
 import logging
 from dataclasses import dataclass
 from functools import lru_cache
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
-import cv2
 import numpy as np
+from PIL import Image
 
 from app.core.config import MODEL_PATH, SHARED_DIR
 
@@ -61,9 +62,13 @@ class HeuristicEmotionModel(EmotionModel):
     def predict(self, face_image: np.ndarray) -> tuple[str, dict[str, float]]:
         brightness = float(face_image.mean())
         contrast = float(face_image.std())
-        edge_density = float(
-            cv2.Canny((face_image * 255).astype(np.uint8), 60, 180).mean() / 255.0
-        )
+
+        # Gradient-based edge density (replaces cv2.Canny)
+        face_uint8 = (face_image * 255).astype(np.float32)
+        gy = np.gradient(face_uint8, axis=0)
+        gx = np.gradient(face_uint8, axis=1)
+        magnitude = np.sqrt(gx**2 + gy**2)
+        edge_density = float((magnitude > 30).mean())
 
         scores = {
             "happy": 0.18 + brightness * 0.24 + edge_density * 0.26,
@@ -92,15 +97,6 @@ def _normalize_scores(scores: list[float], labels: list[str]) -> dict[str, float
 
 
 @lru_cache(maxsize=1)
-def get_face_detector() -> cv2.CascadeClassifier:
-    cascade_path = Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml"
-    detector = cv2.CascadeClassifier(str(cascade_path))
-    if detector.empty():
-        raise InferenceError("Failed to load OpenCV face detector.")
-    return detector
-
-
-@lru_cache(maxsize=1)
 def get_model() -> EmotionModel:
     labels = load_emotion_labels()
 
@@ -122,46 +118,40 @@ def decode_base64_image(data: str) -> np.ndarray:
 
 
 def decode_image_bytes(image_bytes: bytes) -> np.ndarray:
-    buffer = np.frombuffer(image_bytes, dtype=np.uint8)
-    image = cv2.imdecode(buffer, cv2.IMREAD_COLOR)
-    if image is None:
-        raise InferenceError("Unable to decode image.")
-    return image
+    try:
+        img = Image.open(BytesIO(image_bytes)).convert("RGB")
+        return np.array(img)
+    except Exception as error:
+        raise InferenceError("Unable to decode image.") from error
+
+
+def _to_grayscale(rgb: np.ndarray) -> np.ndarray:
+    """Convert an HxWx3 uint8 RGB array to an HxW uint8 grayscale array."""
+    weights = np.array([0.2989, 0.5870, 0.1140], dtype=np.float32)
+    return np.dot(rgb.astype(np.float32), weights).astype(np.uint8)
 
 
 def detect_largest_face(image: np.ndarray) -> tuple[np.ndarray, dict[str, int]]:
-    grayscale = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    grayscale = cv2.equalizeHist(grayscale)
-    detector = get_face_detector()
-    faces = detector.detectMultiScale(
-        grayscale,
-        scaleFactor=1.1,
-        minNeighbors=4,
-        minSize=(48, 48),
-    )
+    """Center-crop the image and convert to grayscale (no OpenCV required)."""
+    height, width = image.shape[:2]
+    crop_size = int(min(width, height) * 0.7)
+    start_x = max((width - crop_size) // 2, 0)
+    start_y = max((height - crop_size) // 2, 0)
 
-    if len(faces) == 0:
-        height, width = grayscale.shape
-        crop_size = int(min(width, height) * 0.7)
-        start_x = max((width - crop_size) // 2, 0)
-        start_y = max((height - crop_size) // 2, 0)
-        face = grayscale[start_y : start_y + crop_size, start_x : start_x + crop_size]
-        return face, {
-            "x": int(start_x),
-            "y": int(start_y),
-            "width": int(crop_size),
-            "height": int(crop_size),
-        }
+    crop = image[start_y : start_y + crop_size, start_x : start_x + crop_size]
+    gray = _to_grayscale(crop)
 
-    x, y, w, h = max(faces, key=lambda face: face[2] * face[3])
-    face = grayscale[y : y + h, x : x + w]
-    return face, {"x": int(x), "y": int(y), "width": int(w), "height": int(h)}
+    return gray, {
+        "x": int(start_x),
+        "y": int(start_y),
+        "width": int(crop_size),
+        "height": int(crop_size),
+    }
 
 
 def preprocess_face(face: np.ndarray) -> np.ndarray:
-    resized = cv2.resize(face, (48, 48))
-    normalized = resized.astype("float32") / 255.0
-    return normalized
+    img = Image.fromarray(face).resize((48, 48), Image.BILINEAR)
+    return np.array(img, dtype=np.float32) / 255.0
 
 
 def predict_from_image(image: np.ndarray) -> PredictionResult:

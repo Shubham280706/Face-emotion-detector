@@ -1,10 +1,17 @@
-const isProd = import.meta.env.PROD;
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
-const WS_BASE_URL =
-  import.meta.env.VITE_WS_BASE_URL ||
-  (isProd
-    ? `wss://${window.location.host}/api/emotion/ws`
-    : `ws://${window.location.host}/api/emotion/ws`);
+const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+
+// In production, we use relative /api. In local development, we target port 8000 directly.
+export const API_BASE_URL = isLocalhost ? 'http://localhost:8000/api' : '/api';
+
+const getWsBaseUrl = () => {
+  if (isLocalhost) {
+    return 'ws://localhost:8000/api/emotion/ws';
+  }
+  const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+  return `${protocol}${window.location.host}/api/emotion/ws`;
+};
+
+export const WS_BASE_URL = getWsBaseUrl();
 
 export async function detectEmotion(formData) {
   const response = await fetch(`${API_BASE_URL}/emotion`, {
